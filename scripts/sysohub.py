@@ -293,7 +293,8 @@ def install_dashboard(config, temp_dir):
     if not prompt_overwrite("Dashboard dependencies", flask_installed):
         print("Skipping dashboard dependencies installation.")
     else:
-        run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests")
+        # Added python3-eventlet to ensure your dashboard finds Eventlet
+        run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests python3-eventlet")
 
     dashboard_file = os.path.join(INSTALL_DIR, "flask_app.py")
     if update_file_if_changed("flask_app.py", dashboard_file, config, temp_dir):
