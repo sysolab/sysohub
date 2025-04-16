@@ -32,8 +32,8 @@ def load_config():
     with open(CONFIG_PATH, 'r') as f:
         return yaml.safe_load(f)['project']
 
-def run_command(command, check=True, ignore_errors=False):
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+def run_command(command, check=True, ignore_errors=False, shell="/bin/bash"):
+    result = subprocess.run(command, shell=True, executable=shell, capture_output=True, text=True)
     if check and result.returncode != 0 and not ignore_errors:
         raise Exception(f"Command failed: {result.stderr}")
     return result
@@ -248,20 +248,21 @@ def install_node_red(config, temp_dir, update_mode=False):
         run_command("sudo systemctl daemon-reload", ignore_errors=True)
         run_command(f"sudo rm -rf /usr/bin/node-red /usr/local/bin/node-red /root/.node-red {NODE_RED_DIR}", check=False)
 
-    # Use the official Node-RED installer script
+    # Use the official Node-RED installer script with explicit bash
     print("Running official Node-RED installer...")
-    run_command("bash <(curl -sL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered) --confirm-install --confirm-pi")
+    run_command("/bin/bash -c 'bash <(curl -sL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered) --confirm-install --confirm-pi'", shell="/bin/bash")
 
     # Ensure Node-RED directory exists with correct permissions
     os.makedirs(NODE_RED_DIR, exist_ok=True)
     run_command(f"sudo chown {USER}:{USER} {NODE_RED_DIR}")
     run_command(f"sudo chmod -R u+rw {NODE_RED_DIR}")
 
-    # Install node-red-contrib-victoriametrics
+    # Install node-red-contrib-victoriametrics (optional, but keeping for compatibility)
     run_command(f"cd {NODE_RED_DIR} && npm install node-red-contrib-victoriametrics")
 
-    # Configure Node-RED flow to forward MQTT to VictoriaMetrics
+    # Configure Node-RED flow to forward MQTT to VictoriaMetrics using InfluxDB line protocol
     flows_file = os.path.join(NODE_RED_DIR, "flows.json")
+    vm_url = f"http://{config['victoria_metrics']['host']}:{config['victoria_metrics']['port']}/api/v1/write"
     flow_content = [
         {
             "id": "mqtt-to-vm",
@@ -292,7 +293,43 @@ def install_node_red(config, temp_dir, update_mode=False):
             "type": "function",
             "z": "mqtt-to-vm",
             "name": "Format for VictoriaMetrics",
-            "func": "msg.payload = [\n    { metric: { __name__: 'temperature', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.temperature)], timestamps: [msg.payload.timestamp * 1000] },\n    { metric: { __name__: 'distance', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.distance)], timestamps: [msg.payload.timestamp * 1000] },\n    { metric: { __name__: 'pH', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.pH)], timestamps: [msg.payload.timestamp * 1000] },\n    { metric: { __name__: 'ORP', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.ORP)], timestamps: [msg.payload.timestamp * 1000] },\n    { metric: { __name__: 'TDS', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.TDS)], timestamps: [msg.payload.timestamp * 1000] },\n    { metric: { __name__: 'EC', deviceID: msg.payload.deviceID }, values: [parseFloat(msg.payload.EC)], timestamps: [msg.payload.timestamp * 1000] }\n];\nreturn msg;",
+            "func": """// Format MQTT data into InfluxDB line protocol for VictoriaMetrics
+var deviceID = msg.payload.deviceID || 'unknown';
+var timestamp = (msg.payload.timestamp || Math.floor(Date.now() / 1000)) * 1000; // Ensure timestamp in milliseconds
+var lines = [];
+var errors = [];
+
+// Define measurements
+var measurements = [
+    { name: 'temperature', value: parseFloat(msg.payload.temperature) },
+    { name: 'distance', value: parseFloat(msg.payload.distance) },
+    { name: 'pH', value: parseFloat(msg.payload.pH) },
+    { name: 'ORP', value: parseFloat(msg.payload.ORP) },
+    { name: 'TDS', value: parseFloat(msg.payload.TDS) },
+    { name: 'EC', value: parseFloat(msg.payload.EC) }
+];
+
+// Validate and create a line for each measurement
+measurements.forEach(function(m) {
+    if (typeof msg.payload[m.name] === 'undefined') {
+        errors.push('Missing field: ' + m.name);
+    } else if (isNaN(m.value)) {
+        errors.push('Invalid value for ' + m.name + ': ' + msg.payload[m.name]);
+    } else {
+        var line = `${m.name},deviceID=${deviceID} value=${m.value} ${timestamp}`;
+        lines.push(line);
+    }
+});
+
+// Log errors if any
+if (errors.length > 0) {
+    node.warn('Errors in MQTT data: ' + errors.join('; '));
+}
+
+// Join lines with newlines
+msg.payload = lines.join('\\n');
+msg.headers = { 'Content-Type': 'text/plain' };
+return msg;""",
             "outputs": 1,
             "noerr": 0,
             "initialize": "",
@@ -300,15 +337,36 @@ def install_node_red(config, temp_dir, update_mode=False):
             "libs": [],
             "x": 300,
             "y": 100,
-            "wires": [["vm-out"]]
+            "wires": [["http-request-node", "debug-node"]]
         },
         {
-            "id": "vm-out",
-            "type": "victoriametrics-out",
+            "id": "http-request-node",
+            "type": "http request",
             "z": "mqtt-to-vm",
-            "name": "VictoriaMetrics Out",
-            "url": "http://192.168.178.40:8428",
+            "name": "Send to VictoriaMetrics",
+            "method": "POST",
+            "ret": "txt",
+            "paytoqs": "ignore",
+            "url": vm_url,
+            "persist": False,
+            "authType": "",
             "x": 500,
+            "y": 100,
+            "wires": [["debug-node"]]
+        },
+        {
+            "id": "debug-node",
+            "type": "debug",
+            "z": "mqtt-to-vm",
+            "name": "Debug Output",
+            "active": True,
+            "tosidebar": True,
+            "console": False,
+            "tostatus": False,
+            "complete": "true",
+            "statusVal": "",
+            "statusType": "auto",
+            "x": 700,
             "y": 100,
             "wires": []
         },
@@ -316,8 +374,8 @@ def install_node_red(config, temp_dir, update_mode=False):
             "id": "mqtt-broker",
             "type": "mqtt-broker",
             "name": "MQTT Broker",
-            "broker": "192.168.178.40",
-            "port": "1883",
+            "broker": config['mqtt']['host'],
+            "port": str(config['mqtt']['port']),
             "clientid": "",
             "autoConnect": True,
             "usetls": False,
@@ -336,8 +394,8 @@ def install_node_red(config, temp_dir, update_mode=False):
             "userProps": "",
             "sessionExpiry": "",
             "credentials": {
-                "user": "plantomioX1",
-                "password": "plantomioX1Pass"
+                "user": config['mqtt']['username'],
+                "password": config['mqtt']['password']
             }
         }
     ]
@@ -442,7 +500,7 @@ WantedBy=multi-user.target
 def setup():
     print("Setting up a fresh Raspberry Pi OS installation...")
     # Set permissions for sysohub.py itself
-    sysohub_script = os.path.join(INSTALL_DIR, "scripts/sysohub.py")
+    sysohub_script = os.path.join(INSTALL_DIR, "scripts", "sysohub.py")
     print(f"Setting permissions for {sysohub_script}...")
     run_command(f"sudo chown {USER}:{USER} {sysohub_script}")
     run_command(f"sudo chmod 755 {sysohub_script}")
