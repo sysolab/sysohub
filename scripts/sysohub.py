@@ -166,6 +166,10 @@ def install_victoria_metrics(config, temp_dir):
     else:
         # Remove any existing invalid binary
         run_command(f"sudo rm -f {vm_binary}", ignore_errors=True)
+        # Ensure /usr/local/bin exists and is writable
+        run_command("sudo mkdir -p /usr/local/bin")
+        run_command("sudo chmod 755 /usr/local/bin")
+        # Use 64-bit ARM binary for arm64 userland
         vm_url = "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.115.0/victoria-metrics-linux-arm64-v1.115.0.tar.gz"
         vm_tar = "/tmp/vm.tar.gz"
         print(f"Downloading VictoriaMetrics from {vm_url}...")
@@ -174,12 +178,21 @@ def install_victoria_metrics(config, temp_dir):
         if not os.path.exists(vm_tar):
             raise FileNotFoundError(f"Failed to download VictoriaMetrics from {vm_url}. Please check the URL or internet connection.")
         
+        # Verify tarball integrity
+        tar_size = os.path.getsize(vm_tar) // 1024  # Size in KB
+        tar_hash = file_hash(vm_tar)
+        print(f"Tarball size: {tar_size} KB, SHA256: {tar_hash}")
+        
         print("Inspecting tarball contents...")
         tar_contents = run_command(f"tar -tzf {vm_tar}", check=False).stdout.strip()
         print(f"Tarball contents:\n{tar_contents}")
+        if "victoria-metrics" not in tar_contents:
+            raise ValueError(f"Tarball does not contain 'victoria-metrics' binary.")
         
         print("Extracting VictoriaMetrics binary...")
-        run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin")
+        result = run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin", check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"Extraction failed: {result.stderr}")
         # Verify the binary was extracted
         if not os.path.exists(vm_binary):
             raise FileNotFoundError(f"Failed to extract VictoriaMetrics binary to {vm_binary}. Tarball may not contain the expected binary.")
