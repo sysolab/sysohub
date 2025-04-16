@@ -14,7 +14,7 @@
         {% endfor %}
     </ul>
     <h2>Latest MQTT Data</h2>
-    <pre>{{ data | tojson(pretty=true) }}</pre>
+    <pre>{{ data | tojson | safe }}</pre>
     <h2>VictoriaMetrics Status</h2>
     <pre>{{ vm_data | tojson(pretty=true) }}</pre>
     <canvas id="telemetryChart"></canvas>
