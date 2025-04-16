@@ -240,6 +240,15 @@ def install_node_red(config, temp_dir):
             run_command("sudo apt install -y nodejs npm")
         run_command("sudo npm install -g --unsafe-perm node-red")
 
+    # Get actual paths to executables
+    node_path = run_command("which node", check=False).stdout.strip()
+    if not node_path:
+        node_path = "/usr/bin/node"  # Default fallback
+        
+    node_red_path = run_command("which node-red", check=False).stdout.strip()
+    if not node_red_path:
+        node_red_path = "/usr/local/bin/node-red"  # Default fallback
+
     node_red_dir = os.path.join(HOME_DIR, ".node-red")
     os.makedirs(node_red_dir, exist_ok=True)
     configs_changed = update_file_if_changed("node_red_settings.js.j2", os.path.join(node_red_dir, "settings.js"), config, temp_dir)
@@ -251,9 +260,11 @@ After=network.target
 
 [Service]
 User={os.getlogin()}
-ExecStart=/usr/bin/node-red
+Environment="NODE_OPTIONS=--max_old_space_size=512"
+ExecStart={node_path} {node_red_path} --max-old-space-size=512 -v
 WorkingDirectory={node_red_dir}
-Restart=always
+Restart=on-failure
+KillSignal=SIGINT
 
 [Install]
 WantedBy=multi-user.target
@@ -274,7 +285,7 @@ WantedBy=multi-user.target
         print("Node-RED is running, skipping start.")
     else:
         print("Starting Node-RED...")
-        run_command("sudo systemctl start nodered", ignore_errors=True)
+        run_command("sudo systemctl restart nodered", ignore_errors=True)
 
 def install_dashboard(config, temp_dir):
     print("Installing Dashboard...")
