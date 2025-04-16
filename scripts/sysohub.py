@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import subprocess
 import yaml
@@ -6,13 +7,15 @@ import argparse
 import tempfile
 import hashlib
 
-# Determine the invoking user's home directory
-def get_user_home():
-    if 'SUDO_USER' in os.environ and os.environ['SUDO_USER']:
-        return os.path.expanduser(f"~{os.environ['SUDO_USER']}")
-    return os.path.expanduser("~")
+# Determine the invoking user's home directory.
+# Use the SUDO_USER if available (so that services run as the non-root user).
+USER = os.environ.get("SUDO_USER") if "SUDO_USER" in os.environ and os.environ["SUDO_USER"] else os.getlogin()
 
-# Check if running as root
+def get_user_home():
+    # Return the home directory of the actual user (not root)
+    return os.path.expanduser(f"~{USER}")
+
+# Check if running as root.
 def check_root():
     if os.geteuid() != 0:
         raise PermissionError("This script must be run with sudo")
@@ -125,7 +128,6 @@ def setup_wifi_ap(config, temp_dir):
             print(f"{service} is enabled, skipping.")
         else:
             run_command(f"sudo systemctl enable {service}", ignore_errors=True)
-
         if is_service_running(service) and not configs_changed:
             print(f"{service} is running, skipping start.")
         else:
@@ -138,7 +140,6 @@ def install_mosquitto(config, temp_dir):
         print("Mosquitto is installed, skipping.")
     else:
         run_command("sudo apt install -y mosquitto mosquitto-clients")
-
     configs_changed = update_file_if_changed("mosquitto.conf.j2", "/etc/mosquitto/mosquitto.conf", config, temp_dir)
     
     passwd_file = "/etc/mosquitto/passwd"
@@ -152,7 +153,6 @@ def install_mosquitto(config, temp_dir):
         print("Mosquitto service is enabled, skipping.")
     else:
         run_command("sudo systemctl enable mosquitto", ignore_errors=True)
-
     if is_service_running("mosquitto") and not configs_changed:
         print("Mosquitto is running, skipping start.")
     else:
@@ -172,10 +172,8 @@ def install_victoria_metrics(config, temp_dir):
         vm_tar = "/tmp/vm.tar.gz"
         print(f"Downloading VictoriaMetrics from {vm_url}...")
         run_command(f"wget {vm_url} -O {vm_tar}")
-        
         if not os.path.exists(vm_tar):
             raise FileNotFoundError("Failed to download VictoriaMetrics.")
-        
         print("Extracting VictoriaMetrics binary...")
         run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin")
         prod_binary = "/usr/local/bin/victoria-metrics-prod"
@@ -186,18 +184,16 @@ def install_victoria_metrics(config, temp_dir):
             raise FileNotFoundError(f"Failed to extract VictoriaMetrics to {vm_binary}.")
         run_command(f"sudo chmod +x {vm_binary}")
         run_command(f"sudo rm -f {vm_tar}")
-
     update_file_if_changed("victoria_metrics.yml.j2", "/etc/victoria-metrics.yml", config, temp_dir)
     
     if run_command("id victoria-metrics", check=False).returncode == 0:
         print("victoria-metrics user exists, skipping.")
     else:
         run_command("sudo useradd -r victoria-metrics", ignore_errors=True)
-
     run_command(f"sudo chown victoria-metrics:victoria-metrics {vm_binary}")
     run_command("sudo mkdir -p /var/lib/victoria-metrics")
     run_command("sudo chown victoria-metrics:victoria-metrics /var/lib/victoria-metrics")
-
+    
     vm_service = "/etc/systemd/system/victoria-metrics.service"
     service_content = f"""[Unit]
 Description=VictoriaMetrics
@@ -218,12 +214,10 @@ WantedBy=multi-user.target
             f.write(service_content)
         run_command(f"sudo mv {temp_dir}/vm.service {vm_service}")
         run_command("sudo systemctl daemon-reload")
-
     if is_service_enabled("victoria-metrics"):
         print("VictoriaMetrics service is enabled, skipping.")
     else:
         run_command("sudo systemctl enable victoria-metrics", ignore_errors=True)
-
     if is_service_running("victoria-metrics"):
         print("VictoriaMetrics is running, skipping start.")
     else:
@@ -239,29 +233,23 @@ def install_node_red(config, temp_dir):
         if not is_package_installed("nodejs"):
             run_command("sudo apt install -y nodejs npm")
         run_command("sudo npm install -g --unsafe-perm node-red")
-
     # Get actual paths to executables
-    node_path = run_command("which node", check=False).stdout.strip()
-    if not node_path:
-        node_path = "/usr/bin/node"  # Default fallback
-        
-    node_red_path = run_command("which node-red", check=False).stdout.strip()
-    if not node_red_path:
-        node_red_path = "/usr/local/bin/node-red"  # Default fallback
-
+    node_path = run_command("which node", check=False).stdout.strip() or "/usr/bin/node"
+    node_red_path = run_command("which node-red", check=False).stdout.strip() or "/usr/local/bin/node-red"
+    # Use the user's home directory (calculated above) for Node-RED's working directory.
     node_red_dir = os.path.join(HOME_DIR, ".node-red")
     os.makedirs(node_red_dir, exist_ok=True)
     configs_changed = update_file_if_changed("node_red_settings.js.j2", os.path.join(node_red_dir, "settings.js"), config, temp_dir)
-
+    
     nodered_service = "/etc/systemd/system/nodered.service"
     service_content = f"""[Unit]
 Description=Node-RED
 After=network.target
 
 [Service]
-User={os.getlogin()}
-Environment="NODE_OPTIONS=--max_old_space_size=512"
-ExecStart={node_path} {node_red_path} --max-old-space-size=512 -v
+User={USER}
+Environment="NODE_OPTIONS=--max_old_space_size=256"
+ExecStart={node_path} {node_red_path} --max-old-space-size=256 -v
 WorkingDirectory={node_red_dir}
 Restart=on-failure
 KillSignal=SIGINT
@@ -275,12 +263,10 @@ WantedBy=multi-user.target
             f.write(service_content)
         run_command(f"sudo mv {temp_dir}/nodered.service {nodered_service}")
         run_command("sudo systemctl daemon-reload")
-
     if is_service_enabled("nodered"):
         print("Node-RED service is enabled, skipping.")
     else:
         run_command("sudo systemctl enable nodered", ignore_errors=True)
-
     if is_service_running("nodered") and not configs_changed:
         print("Node-RED is running, skipping start.")
     else:
@@ -293,15 +279,13 @@ def install_dashboard(config, temp_dir):
     if not prompt_overwrite("Dashboard dependencies", flask_installed):
         print("Skipping dashboard dependencies installation.")
     else:
-        # Added python3-eventlet to ensure your dashboard finds Eventlet
-        run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests python3-eventlet")
-
+        # Now installing all required packages: flask, socketio, paho-mqtt, requests, eventlet, and psutil.
+        run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests python3-eventlet python3-psutil")
     dashboard_file = os.path.join(INSTALL_DIR, "flask_app.py")
     if update_file_if_changed("flask_app.py", dashboard_file, config, temp_dir):
-        run_command(f"sudo chown {os.getlogin()}:{os.getlogin()} {dashboard_file}")
+        run_command(f"sudo chown {USER}:{USER} {dashboard_file}")
         run_command(f"sudo chmod 644 {dashboard_file}")
-
-    # Fix Jinja2 template
+    # Fix Jinja2 template if needed.
     index_html = os.path.join(INSTALL_DIR, "static", "index.html")
     if os.path.exists(index_html):
         with open(index_html, 'r') as f:
@@ -313,16 +297,15 @@ def install_dashboard(config, temp_dir):
             with open(temp_file, 'w') as f:
                 f.write(content)
             run_command(f"sudo mv {temp_file} {index_html}")
-            run_command(f"sudo chown {os.getlogin()}:{os.getlogin()} {index_html}")
+            run_command(f"sudo chown {USER}:{USER} {index_html}")
             run_command(f"sudo chmod 644 {index_html}")
-
     dashboard_service = "/etc/systemd/system/sysohub-dashboard.service"
     service_content = f"""[Unit]
 Description=sysohub Dashboard
 After=network.target
 
 [Service]
-User={os.getlogin()}
+User={USER}
 ExecStart=/usr/bin/python3 {dashboard_file}
 Restart=always
 
@@ -335,12 +318,10 @@ WantedBy=multi-user.target
             f.write(service_content)
         run_command(f"sudo mv {temp_dir}/dashboard.service {dashboard_service}")
         run_command("sudo systemctl daemon-reload")
-
     if is_service_enabled("sysohub-dashboard"):
         print("Dashboard service is enabled, skipping.")
     else:
         run_command("sudo systemctl enable sysohub-dashboard", ignore_errors=True)
-
     if is_service_running("sysohub-dashboard"):
         print("Dashboard is running, skipping start.")
     else:
@@ -360,7 +341,7 @@ def update():
     print("Updating services...")
     run_command("sudo apt update && sudo apt upgrade -y")
     run_command("sudo npm install -g --unsafe-perm node-red")
-    run_command("sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests")
+    run_command("sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests python3-eventlet python3-psutil")
     run_command("sudo systemctl restart mosquitto victoria-metrics nodered sysohub-dashboard", ignore_errors=True)
 
 def status():
@@ -373,7 +354,6 @@ def main():
     parser = argparse.ArgumentParser(description="sysohub IoT Lite Setup")
     parser.add_argument("command", choices=["setup", "backup", "update", "status"])
     args = parser.parse_args()
-
     with tempfile.TemporaryDirectory() as temp_dir:
         config = load_config()
         if args.command == "setup":

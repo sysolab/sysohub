@@ -20,5 +20,5 @@ project:
   node_red_username: "admin"
   # IMPORTANT: Generate the hash for your desired password using:
   #       node-red admin hash-pw YOUR_PASSWORD
-  # and paste the output below.
+  # and paste the output below., default is "admin"
   node_red_password_hash: "$2b$08$W99V1mAwhUg5M9.hX6kjY.qtLHyvk1YbiXIMQ8T.xafDsGHNEa1Na"

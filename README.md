@@ -56,3 +56,6 @@ Scaling
 Flash multiple SD cards with flash_image.sh.
 Use a prebuilt image for faster deployment.
 
+
+License:
+The code base is property of SYSO OÜ. If you plan to use it for commercial purpose please contact me. 
