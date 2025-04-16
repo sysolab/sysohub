@@ -7,6 +7,7 @@ import eventlet.wsgi
 from threading import Lock
 import psutil
 import subprocess
+import time
 
 app = Flask(__name__)
 sio = socketio.Server(async_mode='eventlet')
@@ -18,7 +19,7 @@ data_lock = Lock()
 MAX_POINTS = 50
 
 # MQTT settings
-MQTT_BROKER = "192.168.4.1"
+MQTT_BROKER = "192.168.178.40"
 MQTT_PORT = 1883
 MQTT_TOPIC = "v1/devices/me/telemetry"
 MQTT_USER = "plantomioX1"
@@ -41,8 +42,11 @@ def get_system_stats():
     }
 
 def on_connect(client, userdata, flags, rc):
-    print(f"Connected to MQTT with code {rc}")
-    client.subscribe(MQTT_TOPIC)
+    if rc == 0:
+        print(f"Connected to MQTT with code {rc}")
+        client.subscribe(MQTT_TOPIC)
+    else:
+        print(f"Failed to connect to MQTT with code {rc}")
 
 def on_message(client, userdata, msg):
     try:
@@ -66,13 +70,32 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"MQTT error: {e}")
 
-# MQTT client setup
-mqtt_client = mqtt.Client()
-mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT)
-mqtt_client.loop_start()
+# MQTT client setup with retry logic
+def connect_mqtt_with_retry():
+    client = mqtt.Client()
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    retries = 5
+    backoff = 1  # Start with 1 second
+    for attempt in range(retries):
+        try:
+            print(f"Attempting to connect to MQTT broker (Attempt {attempt + 1}/{retries})...")
+            client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            client.loop_start()
+            return client
+        except Exception as e:
+            print(f"Failed to connect to MQTT: {e}")
+            if attempt < retries - 1:
+                print(f"Retrying in {backoff} seconds...")
+                time.sleep(backoff)
+                backoff *= 2  # Exponential backoff
+            else:
+                print("Max retries reached. MQTT connection failed.")
+                return None
+
+mqtt_client = connect_mqtt_with_retry()
 
 @app.route('/')
 def index():
@@ -82,4 +105,6 @@ def index():
     return render_template('index.html', pretty_json=pretty_json, services=get_service_status(), system=get_system_stats())
 
 if __name__ == '__main__':
+    if mqtt_client is None:
+        print("Starting Flask app without MQTT connection...")
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
