@@ -1,48 +1,189 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>sysohub IoT Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css">
-    <script src="/static/chart.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantOMIO Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"></script>
+    <style>
+        body { background-color: #f8fafc; }
+        .sidebar { background-color: #1e293b; }
+        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); }
+        pre { background-color: #1e293b; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
+        .modal { backdrop-filter: blur(5px); }
+    </style>
 </head>
-<body>
-    <h1>sysohub IoT Dashboard ({{ config.name }})</h1>
-    <h2>Service Status</h2>
-    <ul>
-        {% for service, status in services.items() %}
-        <li>{{ service }}: {{ 'Running' if status else 'Stopped' }}</li>
-        {% endfor %}
-    </ul>
-    <h2>Latest MQTT Data</h2>
-    <pre>{{ data | tojson | safe }}</pre>
-    <h2>VictoriaMetrics Status</h2>
-    <pre>{{ vm_data | tojson(pretty=true) }}</pre>
-    <canvas id="telemetryChart"></canvas>
+<body class="flex min-h-screen">
+    <!-- Sidebar -->
+    <div class="sidebar w-16 flex flex-col items-center py-4">
+        <div class="text-white text-xl font-bold mb-8">P</div>
+        <div class="space-y-4">
+            <svg class="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            <svg class="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 p-6">
+        <!-- Top Bar -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-800">PlantOMIO Dashboard</h1>
+            <button onclick="openSettings()" class="text-gray-600 hover:text-gray-800">
+                <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37zM12 15a3 3 0 100-6 3 3 0 000 6z"/></svg>
+            </button>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <!-- System Stats -->
+            <div class="card p-4">
+                <h2 class="text-lg font-semibold text-gray-700">System Stats</h2>
+                <p class="text-3xl font-bold text-gray-800" id="cpu">{{ system.cpu }}%</p>
+                <p class="text-sm text-gray-500">CPU Usage</p>
+                <p class="text-3xl font-bold text-gray-800 mt-2" id="memory">{{ system.memory }}%</p>
+                <p class="text-sm text-gray-500">Memory Usage</p>
+            </div>
+
+            <!-- Service Status -->
+            <div class="card p-4">
+                <h2 class="text-lg font-semibold text-gray-700">Service Status</h2>
+                <ul class="mt-2 space-y-1">
+                    {% for service, status in services.items() %}
+                    <li class="flex items-center">
+                        <span class="w-3 h-3 rounded-full mr-2 {{ 'bg-green-500' if status else 'bg-red-500' }}"></span>
+                        <span class="text-gray-600">{{ service }}: {{ 'Running' if status else 'Stopped' }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <!-- Latest Data -->
+            <div class="card p-4">
+                <h2 class="text-lg font-semibold text-gray-700">Latest Sensor Data</h2>
+                <pre class="text-sm" id="data">{{ pretty_json }}</pre>
+            </div>
+        </div>
+
+        <!-- Line Chart -->
+        <div class="card p-4">
+            <h2 class="text-lg font-semibold text-gray-700 mb-2">Sensor Data Over Time</h2>
+            <canvas id="sensorChart" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">
+        <div class="bg-white rounded-lg p-6 w-96">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Settings</h2>
+            <label class="block text-gray-600 mb-2">Refresh Interval (seconds)</label>
+            <input type="number" id="refreshInterval" value="1" min="1" class="w-full p-2 border rounded mb-4">
+            <div class="flex justify-end space-x-2">
+                <button onclick="closeSettings()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button onclick="saveSettings()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        const ctx = document.getElementById('telemetryChart').getContext('2d');
-        const chart = new Chart(ctx, {
+        const socket = io();
+        let chart;
+        const dataPoints = {};
+        const labels = [];
+
+        // Initialize Chart
+        const ctx = document.getElementById('sensorChart').getContext('2d');
+        chart = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: [],
-                datasets: [{
-                    label: 'Telemetry',
-                    data: [],
-                    borderColor: 'blue',
-                    fill: false
-                }]
+                labels: labels,
+                datasets: []
             },
             options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: { display: false }
+                },
                 scales: {
-                    x: { type: 'time' }
+                    x: { title: { display: true, text: 'Timestamp' } },
+                    y: { title: { display: true, text: 'Value' } }
                 }
             }
         });
-        // Fetch data periodically
-        setInterval(() => {
-            fetch('/').then(res => res.text()).then(html => {
-                // Update chart with new data (simplified)
+
+        const colors = {
+            temperature: { border: '#f97316', background: '#fed7aa' },
+            distance: { border: '#22c55e', background: '#bbf7d0' },
+            pH: { border: '#3b82f6', background: '#bfdbfe' },
+            ORP: { border: '#ec4899', background: '#f9a8d4' },
+            TDS: { border: '#a855f7', background: '#d8b4fe' },
+            EC: { border: '#eab308', background: '#fef08a' }
+        };
+
+        socket.on('data_update', (msg) => {
+            const { data, store, services, system } = msg;
+
+            // Update system stats
+            document.getElementById('cpu').textContent = `${system.cpu}%`;
+            document.getElementById('memory').textContent = `${system.memory}%`;
+
+            // Update service status
+            Object.keys(services).forEach(service => {
+                const el = document.querySelector(`li:has(span:contains("${service}")) span.w-3`);
+                el.className = `w-3 h-3 rounded-full mr-2 ${services[service] ? 'bg-green-500' : 'bg-red-500'}`;
+                const statusText = document.querySelector(`li:has(span:contains("${service}")) span.text-gray-600`);
+                statusText.textContent = `${service}: ${services[service] ? 'Running' : 'Stopped'}`;
             });
-        }, 5000);
+
+            // Update JSON display
+            document.getElementById('data').textContent = JSON.stringify(data, null, 2);
+
+            // Update chart
+            Object.keys(store).forEach(key => {
+                if (!(key in dataPoints)) {
+                    dataPoints[key] = [];
+                    chart.data.datasets.push({
+                        label: key,
+                        data: dataPoints[key],
+                        borderColor: colors[key]?.border || '#6b7280',
+                        backgroundColor: colors[key]?.background || '#d1d5db',
+                        fill: true,
+                        tension: 0.3
+                    });
+                }
+                store[key].forEach(point => {
+                    dataPoints[key].push(point.value);
+                    if (dataPoints[key].length > 50) dataPoints[key].shift();
+                });
+            });
+
+            labels.length = 0;
+            store[Object.keys(store)[0]]?.forEach(point => labels.push(point.timestamp));
+            if (labels.length > 50) labels.shift();
+
+            chart.data.labels = labels;
+            chart.update();
+        });
+
+        // Settings Modal
+        function openSettings() {
+            document.getElementById('settingsModal').classList.remove('hidden');
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            const interval = parseInt(document.getElementById('refreshInterval').value);
+            if (interval >= 1) {
+                // Refresh interval handled by SocketIO frequency
+                console.log(`Refresh interval set to ${interval}s`);
+            }
+            closeSettings();
+        }
     </script>
 </body>
 </html>

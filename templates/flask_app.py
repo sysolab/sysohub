@@ -1,49 +1,85 @@
 from flask import Flask, render_template
 import paho.mqtt.client as mqtt
-import requests
+import json
+import socketio
+import eventlet
+import eventlet.wsgi
+from threading import Lock
+import psutil
 import subprocess
-import yaml
-import os
 
-HOME_DIR = os.path.expanduser("~")
-INSTALL_DIR = os.path.join(HOME_DIR, "sysohub")
-CONFIG_PATH = os.path.join(INSTALL_DIR, "config", "config.yml")
+app = Flask(__name__)
+sio = socketio.Server(async_mode='eventlet')
+app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
 
-app = Flask(__name__, template_folder=os.path.join(INSTALL_DIR, "static"))
+# In-memory data store: {key: [{timestamp, value}]}
+data_store = {}
+data_lock = Lock()
+MAX_POINTS = 50
 
-def load_config():
-    with open(CONFIG_PATH, 'r') as f:
-        return yaml.safe_load(f)['project']
+# MQTT settings
+MQTT_BROKER = "192.168.4.1"
+MQTT_PORT = 1883
+MQTT_TOPIC = "v1/devices/me/telemetry"
+MQTT_USER = "plantomioX1"
+MQTT_PASS = "plantomioX1Pass"
 
-config = load_config()
+# Service list
+SERVICES = ["mosquitto", "victoria-metrics", "nodered", "hostapd", "dnsmasq"]
 
-mqtt_client = mqtt.Client()
-mqtt_client.username_pw_set(config['mqtt']['username'], config['mqtt']['password'])
-mqtt_client.connect(config['mqtt']['uri'].replace('mqtt://', ''), config['mqtt']['port'])
-latest_data = {}
+def get_service_status():
+    status = {}
+    for service in SERVICES:
+        result = subprocess.run(f"systemctl is-active {service}", shell=True, capture_output=True, text=True)
+        status[service] = result.stdout.strip() == "active"
+    return status
+
+def get_system_stats():
+    return {
+        "cpu": psutil.cpu_percent(interval=1),
+        "memory": psutil.virtual_memory().percent
+    }
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected to MQTT with code {rc}")
+    client.subscribe(MQTT_TOPIC)
 
 def on_message(client, userdata, msg):
-    global latest_data
-    latest_data[msg.topic] = msg.payload.decode()
+    try:
+        payload = json.loads(msg.payload.decode())
+        timestamp = payload.get("timestamp", 0)
+        with data_lock:
+            for key, value in payload.items():
+                if key in ["temperature", "distance", "pH", "ORP", "TDS", "EC"]:
+                    if key not in data_store:
+                        data_store[key] = []
+                    data_store[key].append({"timestamp": timestamp, "value": float(value)})
+                    if len(data_store[key]) > MAX_POINTS:
+                        data_store[key].pop(0)
+            # Emit update to clients
+            sio.emit('data_update', {
+                'data': payload,
+                'store': data_store,
+                'services': get_service_status(),
+                'system': get_system_stats()
+            })
+    except Exception as e:
+        print(f"MQTT error: {e}")
 
+# MQTT client setup
+mqtt_client = mqtt.Client()
+mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
-mqtt_client.subscribe(config['mqtt']['topic'])
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT)
 mqtt_client.loop_start()
 
 @app.route('/')
 def index():
-    vm_url = f"http://localhost:{config['victoria_metrics']['port']}/api/v1/query?query=up"
-    try:
-        vm_data = requests.get(vm_url).json()
-    except:
-        vm_data = {"status": "error"}
-    
-    services = {}
-    for service in ["mosquitto", "victoria-metrics", "nodered", "hostapd", "dnsmasq"]:
-        result = subprocess.run(f"systemctl is-active {service}", shell=True, capture_output=True, text=True)
-        services[service] = result.stdout.strip() == "active"
-    
-    return render_template('index.html', data=latest_data, vm_data=vm_data, services=services, config=config)
+    with data_lock:
+        latest_data = data_store.copy()
+        pretty_json = json.dumps(latest_data, indent=2) if latest_data else "{}"
+    return render_template('index.html', pretty_json=pretty_json, services=get_service_status(), system=get_system_stats())
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=config['dashboard']['port'])
+if __name__ == '__main__':
+    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
