@@ -7,15 +7,13 @@ import argparse
 import tempfile
 import hashlib
 
-# Determine the invoking user's home directory.
-# Use the SUDO_USER if available (so that services run as the non-root user).
+# Determine the actual user to run services as (from SUDO_USER if available)
 USER = os.environ.get("SUDO_USER") if "SUDO_USER" in os.environ and os.environ["SUDO_USER"] else os.getlogin()
 
 def get_user_home():
-    # Return the home directory of the actual user (not root)
+    # Returns the home directory of the actual user (not root)
     return os.path.expanduser(f"~{USER}")
 
-# Check if running as root.
 def check_root():
     if os.geteuid() != 0:
         raise PermissionError("This script must be run with sudo")
@@ -91,12 +89,10 @@ def setup_wifi_ap(config, temp_dir):
             print(f"{pkg} is installed, skipping.")
         else:
             run_command(f"sudo apt update && sudo apt install -y {pkg}")
-
     services = ["hostapd", "dnsmasq", "avahi-daemon"]
     for service in services:
         run_command(f"sudo systemctl unmask {service}", ignore_errors=True)
         run_command(f"sudo systemctl stop {service}", ignore_errors=True)
-
     configs = [
         ("dhcpcd.conf.j2", "/etc/dhcpcd.conf"),
         ("hostapd.conf.j2", "/etc/hostapd/hostapd.conf"),
@@ -106,23 +102,19 @@ def setup_wifi_ap(config, temp_dir):
     for template, dest in configs:
         if update_file_if_changed(template, dest, config, temp_dir):
             configs_changed = True
-
     default_hostapd = "/etc/default/hostapd"
     default_content = 'DAEMON_CONF="/etc/hostapd/hostapd.conf"'
     if file_hash(default_hostapd) != hashlib.sha256(default_content.encode()).hexdigest():
         print("Updating /etc/default/hostapd...")
         run_command(f"echo '{default_content}' | sudo tee {default_hostapd}")
-
     hostname = config['hostname']
     if run_command("cat /etc/hostname", check=False).stdout.strip() != hostname:
         print("Updating hostname...")
         run_command(f"echo {hostname} | sudo tee /etc/hostname")
         run_command(f"sudo sed -i 's/127.0.0.1.*/127.0.1.1 {hostname}/' /etc/hosts")
-
     if run_command("sysctl net.ipv4.ip_forward", check=False).stdout.strip() != "net.ipv4.ip_forward = 1":
         print("Enabling IP forwarding...")
         run_command("sudo sysctl -w net.ipv4.ip_forward=1")
-
     for service in services:
         if is_service_enabled(service):
             print(f"{service} is enabled, skipping.")
@@ -141,14 +133,12 @@ def install_mosquitto(config, temp_dir):
     else:
         run_command("sudo apt install -y mosquitto mosquitto-clients")
     configs_changed = update_file_if_changed("mosquitto.conf.j2", "/etc/mosquitto/mosquitto.conf", config, temp_dir)
-    
     passwd_file = "/etc/mosquitto/passwd"
     passwd_content = f"{config['mqtt']['username']}:{config['mqtt']['password']}"
     if file_hash(passwd_file) != hashlib.sha256(passwd_content.encode()).hexdigest():
         print("Updating Mosquitto password...")
         run_command(f"echo '{passwd_content}' | sudo tee {passwd_file}")
         run_command(f"sudo mosquitto_passwd -U {passwd_file}")
-
     if is_service_enabled("mosquitto"):
         print("Mosquitto service is enabled, skipping.")
     else:
@@ -185,7 +175,6 @@ def install_victoria_metrics(config, temp_dir):
         run_command(f"sudo chmod +x {vm_binary}")
         run_command(f"sudo rm -f {vm_tar}")
     update_file_if_changed("victoria_metrics.yml.j2", "/etc/victoria-metrics.yml", config, temp_dir)
-    
     if run_command("id victoria-metrics", check=False).returncode == 0:
         print("victoria-metrics user exists, skipping.")
     else:
@@ -193,7 +182,6 @@ def install_victoria_metrics(config, temp_dir):
     run_command(f"sudo chown victoria-metrics:victoria-metrics {vm_binary}")
     run_command("sudo mkdir -p /var/lib/victoria-metrics")
     run_command("sudo chown victoria-metrics:victoria-metrics /var/lib/victoria-metrics")
-    
     vm_service = "/etc/systemd/system/victoria-metrics.service"
     service_content = f"""[Unit]
 Description=VictoriaMetrics
@@ -233,15 +221,15 @@ def install_node_red(config, temp_dir):
         if not is_package_installed("nodejs"):
             run_command("sudo apt install -y nodejs npm")
         run_command("sudo npm install -g --unsafe-perm node-red")
-    # Get actual paths to executables
+    # Get paths to executables
     node_path = run_command("which node", check=False).stdout.strip() or "/usr/bin/node"
     node_red_path = run_command("which node-red", check=False).stdout.strip() or "/usr/local/bin/node-red"
-    # Use the user's home directory (calculated above) for Node-RED's working directory.
+    # Set Node-RED's working directory under the actual user's home directory
     node_red_dir = os.path.join(HOME_DIR, ".node-red")
     os.makedirs(node_red_dir, exist_ok=True)
     configs_changed = update_file_if_changed("node_red_settings.js.j2", os.path.join(node_red_dir, "settings.js"), config, temp_dir)
-    
     nodered_service = "/etc/systemd/system/nodered.service"
+    # Set HOME environment variable so that Node-RED creates its folder in the proper location.
     service_content = f"""[Unit]
 Description=Node-RED
 After=network.target
@@ -249,6 +237,7 @@ After=network.target
 [Service]
 User={USER}
 Environment="NODE_OPTIONS=--max_old_space_size=512"
+Environment="HOME={HOME_DIR}"
 ExecStart={node_path} {node_red_path} --max-old-space-size=512 -v
 WorkingDirectory={node_red_dir}
 Restart=on-failure
@@ -279,13 +268,12 @@ def install_dashboard(config, temp_dir):
     if not prompt_overwrite("Dashboard dependencies", flask_installed):
         print("Skipping dashboard dependencies installation.")
     else:
-        # Now installing all required packages: flask, socketio, paho-mqtt, requests, eventlet, and psutil.
+        # Install all required packages: flask, socketio, paho-mqtt, requests, eventlet, and psutil.
         run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests python3-eventlet python3-psutil")
     dashboard_file = os.path.join(INSTALL_DIR, "flask_app.py")
     if update_file_if_changed("flask_app.py", dashboard_file, config, temp_dir):
         run_command(f"sudo chown {USER}:{USER} {dashboard_file}")
         run_command(f"sudo chmod 644 {dashboard_file}")
-    # Fix Jinja2 template if needed.
     index_html = os.path.join(INSTALL_DIR, "static", "index.html")
     if os.path.exists(index_html):
         with open(index_html, 'r') as f:
@@ -328,6 +316,36 @@ WantedBy=multi-user.target
         print("Starting Dashboard...")
         run_command("sudo systemctl start sysohub-dashboard", ignore_errors=True)
 
+# New function: purge_all()
+def purge_all(temp_dir, config):
+    print("Purging all installed services and configurations for a fresh install...")
+    # Stop and disable services
+    for service in ["nodered", "sysohub-dashboard", "victoria-metrics"]:
+        run_command(f"sudo systemctl stop {service}", ignore_errors=True)
+        run_command(f"sudo systemctl disable {service}", ignore_errors=True)
+    # Remove service files created by sysohub
+    for service_file in ["/etc/systemd/system/nodered.service",
+                         "/etc/systemd/system/sysohub-dashboard.service",
+                         "/etc/systemd/system/victoria-metrics.service"]:
+        if os.path.exists(service_file):
+            print(f"Removing {service_file}...")
+            run_command(f"sudo rm -f {service_file}", ignore_errors=True)
+    # Remove Node-RED working directory (~/.node-red)
+    node_red_dir = os.path.join(get_user_home(), ".node-red")
+    if os.path.exists(node_red_dir):
+        print(f"Removing Node-RED working directory {node_red_dir}...")
+        run_command(f"sudo rm -rf {node_red_dir}", ignore_errors=True)
+    # Uninstall Node-RED globally (if installed)
+    print("Uninstalling Node-RED globally...")
+    run_command("sudo npm uninstall -g node-red", ignore_errors=True)
+    # Remove VictoriaMetrics config (optional)
+    if os.path.exists("/etc/victoria-metrics.yml"):
+        print("Removing VictoriaMetrics config at /etc/victoria-metrics.yml...")
+        run_command("sudo rm -f /etc/victoria-metrics.yml", ignore_errors=True)
+    # Reload systemd daemon
+    run_command("sudo systemctl daemon-reload", ignore_errors=True)
+    print("Purge complete.")
+
 def backup():
     print("Creating backup...")
     backup_dir = os.path.join(HOME_DIR, "backups")
@@ -352,11 +370,22 @@ def status():
 def main():
     check_root()
     parser = argparse.ArgumentParser(description="sysohub IoT Lite Setup")
-    parser.add_argument("command", choices=["setup", "backup", "update", "status"])
+    parser.add_argument("command", choices=["setup", "backup", "update", "status", "purge"])
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as temp_dir:
         config = load_config()
-        if args.command == "setup":
+        if args.command == "purge":
+            # First purge everything, then proceed with a fresh setup
+            purge_all(temp_dir, config)
+            print("Proceeding with a fresh installation after purge...")
+            setup_wifi_ap(config, temp_dir)
+            install_mosquitto(config, temp_dir)
+            install_victoria_metrics(config, temp_dir)
+            install_node_red(config, temp_dir)
+            install_dashboard(config, temp_dir)
+            print("Purge and fresh setup complete. Rebooting...")
+            run_command("sudo reboot")
+        elif args.command == "setup":
             setup_wifi_ap(config, temp_dir)
             install_mosquitto(config, temp_dir)
             install_victoria_metrics(config, temp_dir)
