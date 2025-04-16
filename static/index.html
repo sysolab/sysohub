@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>sysohub IoT Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/chart.js"></script>
+</head>
+<body>
+    <h1>sysohub IoT Dashboard ({{ config.name }})</h1>
+    <h2>Service Status</h2>
+    <ul>
+        {% for service, status in services.items() %}
+        <li>{{ service }}: {{ 'Running' if status else 'Stopped' }}</li>
+        {% endfor %}
+    </ul>
+    <h2>Latest MQTT Data</h2>
+    <pre>{{ data | tojson(pretty=true) }}</pre>
+    <h2>VictoriaMetrics Status</h2>
+    <pre>{{ vm_data | tojson(pretty=true) }}</pre>
+    <canvas id="telemetryChart"></canvas>
+    <script>
+        const ctx = document.getElementById('telemetryChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Telemetry',
+                    data: [],
+                    borderColor: 'blue',
+                    fill: false
+                }]
+            },
+            options: {
+                scales: {
+                    x: { type: 'time' }
+                }
+            }
+        });
+        // Fetch data periodically
+        setInterval(() => {
+            fetch('/').then(res => res.text()).then(html => {
+                // Update chart with new data (simplified)
+            });
+        }, 5000);
+    </script>
+</body>
+</html>

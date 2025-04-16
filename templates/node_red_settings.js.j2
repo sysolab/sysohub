@@ -1,0 +1,23 @@
+module.exports = {
+    flowFile: 'flows.json',
+    flowFilePretty: true,
+    adminAuth: {
+        type: "credentials",
+        users: [{
+            username: "admin",
+            password: "$2a$08$zZWtXTja0fB1pzD4sHCMyOCMYz2Z6dNbM6tl8sJogENOMcxWV9DN.",
+            permissions: "*"
+        }]
+    },
+    httpAdminRoot: "/admin",
+    httpNodeRoot: "/",
+    userDir: "/home/pi/.node-red",
+    nodesDir: "/home/pi/.node-red/nodes",
+    functionGlobalContext: {},
+    mqttConfig: {
+        host: "{{ mqtt.uri | replace('mqtt://', '') }}",
+        port: {{ mqtt.port }},
+        username: "{{ mqtt.username }}",
+        password: "{{ mqtt.password }}"
+    }
+};

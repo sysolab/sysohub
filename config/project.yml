@@ -1,0 +1,18 @@
+project:
+  name: plantomio
+  hostname: plantomio.local
+  wifi_ssid: plantomio_ap
+  wifi_password: plantomio123
+  mqtt:
+    uri: mqtt://plantomio.local
+    port: 1883
+    username: plantomioX1
+    client_id: plantomioX1
+    password: plantomioX1Pass
+    topic: v1/devices/me/telemetry
+  victoria_metrics:
+    port: 8428
+  node_red:
+    port: 1880
+  dashboard:
+    port: 5000
