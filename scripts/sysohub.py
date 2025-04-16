@@ -243,13 +243,14 @@ def install_node_red(config, temp_dir, update_mode=False):
     if node_red_installed:
         print("Node-RED is installed, cleaning up for fresh install...")
         run_command("sudo systemctl stop nodered || true", check=False)
-        run_command("sudo apt remove -y nodered nodejs npm || true", check=False)
+        run_command("sudo systemctl disable nodered || true", check=False)
+        run_command("sudo rm -f /lib/systemd/system/nodered.service", ignore_errors=True)
+        run_command("sudo systemctl daemon-reload", ignore_errors=True)
         run_command(f"sudo rm -rf /usr/bin/node-red /usr/local/bin/node-red /root/.node-red {NODE_RED_DIR}", check=False)
 
-    # Install Node.js and Node-RED
-    run_command("wget -O - https://raw.githubusercontent.com/nodesource/distributions/master/deb/setup_18.x | bash -")
-    run_command("sudo apt install -y nodejs")
-    run_command("sudo npm install -g --unsafe-perm node-red")
+    # Use the official Node-RED installer script
+    print("Running official Node-RED installer...")
+    run_command("bash <(curl -sL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered) --confirm-install --confirm-pi")
 
     # Ensure Node-RED directory exists with correct permissions
     os.makedirs(NODE_RED_DIR, exist_ok=True)
@@ -345,23 +346,23 @@ def install_node_red(config, temp_dir, update_mode=False):
     run_command(f"sudo chown {USER}:{USER} {flows_file}")
     run_command(f"sudo chmod 644 {flows_file}")
 
-    # Get actual paths to executables
-    node_path = run_command("which node", check=False).stdout.strip() or "/usr/bin/node"
-    node_red_path = run_command("which node-red", check=False).stdout.strip() or "/usr/local/bin/node-red"
-
-    # Update Node-RED service
-    nodered_service = "/etc/systemd/system/nodered.service"
+    # Update Node-RED service to ensure it runs as the correct user
+    nodered_service = "/lib/systemd/system/nodered.service"  # Location used by the official installer
+    node_red_path = run_command("which node-red", check=False).stdout.strip() or "/usr/bin/node-red"
     service_content = f"""[Unit]
-Description=Node-RED
+Description=Node-RED graphical event wiring tool
 After=network.target
 
 [Service]
+Type=simple
 User={USER}
-Environment="NODE_RED_HOME={NODE_RED_DIR}"
-ExecStart={node_path} {node_red_path} --userDir {NODE_RED_DIR} --max-old-space-size=512 -v
+Group={USER}
 WorkingDirectory={NODE_RED_DIR}
+Environment="NODE_RED_HOME={NODE_RED_DIR}"
+ExecStart={node_red_path} --userDir {NODE_RED_DIR} --max-old-space-size=512
 Restart=on-failure
 KillSignal=SIGINT
+SyslogIdentifier=Node-RED
 
 [Install]
 WantedBy=multi-user.target
@@ -441,7 +442,7 @@ WantedBy=multi-user.target
 def setup():
     print("Setting up a fresh Raspberry Pi OS installation...")
     # Set permissions for sysohub.py itself
-    sysohub_script = os.path.join(INSTALL_DIR, "scripts/sysohub.py")
+    sysohub_script = os.path.join(INSTALL_DIR, "sysohub.py")
     print(f"Setting permissions for {sysohub_script}...")
     run_command(f"sudo chown {USER}:{USER} {sysohub_script}")
     run_command(f"sudo chmod 755 {sysohub_script}")
@@ -482,6 +483,7 @@ def purge():
         run_command(f"sudo systemctl stop {service}", ignore_errors=True)
         run_command(f"sudo systemctl disable {service}", ignore_errors=True)
         run_command(f"sudo rm -f /etc/systemd/system/{service}.service", ignore_errors=True)
+        run_command(f"sudo rm -f /lib/systemd/system/{service}.service", ignore_errors=True)
 
     # Remove packages
     packages = ["hostapd", "dnsmasq", "avahi-daemon", "mosquitto", "mosquitto-clients", "nodejs", "npm",
