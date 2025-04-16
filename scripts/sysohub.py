@@ -4,14 +4,31 @@ import yaml
 import jinja2
 import argparse
 import shutil
+import getpass
 from pathlib import Path
 
-HOME_DIR = os.path.expanduser("~")
+# Determine the invoking user's home directory
+def get_user_home():
+    if 'SUDO_USER' in os.environ and os.environ['SUDO_USER']:
+        # When running with sudo, use SUDO_USER's home directory
+        return os.path.expanduser(f"~{os.environ['SUDO_USER']}")
+    else:
+        # Otherwise, use the current user's home directory
+        return os.path.expanduser("~")
+
+# Check if running as root
+def check_root():
+    if os.geteuid() != 0:
+        raise PermissionError("This script must be run with sudo (e.g., 'sudo python3 sysohub.py setup')")
+
+HOME_DIR = get_user_home()
 INSTALL_DIR = os.path.join(HOME_DIR, "sysohub")
 CONFIG_PATH = os.path.join(INSTALL_DIR, "config", "config.yml")
 TEMPLATES_DIR = os.path.join(INSTALL_DIR, "templates")
 
 def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH}")
     with open(CONFIG_PATH, 'r') as f:
         return yaml.safe_load(f)['project']
 
@@ -108,6 +125,9 @@ def status():
         run_command(f"systemctl status {service} --no-pager", check=False)
 
 def main():
+    # Ensure the script is run with sudo
+    check_root()
+
     parser = argparse.ArgumentParser(description="sysohub IoT Lite Setup and Management")
     parser.add_argument("command", choices=["setup", "backup", "update", "status"], help="Command to execute")
     args = parser.parse_args()
