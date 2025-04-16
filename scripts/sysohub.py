@@ -112,7 +112,7 @@ def setup_wifi_ap(config, temp_dir):
     if run_command("cat /etc/hostname", check=False).stdout.strip() != hostname:
         print("Updating hostname...")
         run_command(f"echo {hostname} | sudo tee /etc/hostname")
-        run_command(f"sudo sed -i 's/127.0.0.1.*/127.0.0.1 {hostname}/' /etc/hosts")
+        run_command(f"sudo sed -i 's/127.0.0.1.*/127.0.1.1 {hostname}/' /etc/hosts")
 
     if run_command("sysctl net.ipv4.ip_forward", check=False).stdout.strip() != "net.ipv4.ip_forward = 1":
         print("Enabling IP forwarding...")
@@ -174,11 +174,15 @@ def install_victoria_metrics(config, temp_dir):
         if not os.path.exists(vm_tar):
             raise FileNotFoundError(f"Failed to download VictoriaMetrics from {vm_url}. Please check the URL or internet connection.")
         
+        print("Inspecting tarball contents...")
+        tar_contents = run_command(f"tar -tzf {vm_tar}", check=False).stdout.strip()
+        print(f"Tarball contents:\n{tar_contents}")
+        
         print("Extracting VictoriaMetrics binary...")
         run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin")
         # Verify the binary was extracted
         if not os.path.exists(vm_binary):
-            raise FileNotFoundError(f"Failed to extract VictoriaMetrics binary to {vm_binary}.")
+            raise FileNotFoundError(f"Failed to extract VictoriaMetrics binary to {vm_binary}. Tarball may not contain the expected binary.")
         run_command(f"sudo chmod +x {vm_binary}")
         run_command(f"sudo rm -f {vm_tar}")
 
