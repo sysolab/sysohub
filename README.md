@@ -7,8 +7,8 @@ SD card with at least 8GB.
 
 Setup Instructions
 
-Clone the repository:git clone https://github.com/sysohub/iot-lite.git
-cd iot-lite
+Clone the repository:git clone git@github.com:sysolab/sysohub.git
+cd sysohub
 
 
 Configure config/config.yml (e.g., change name to "greenio").
@@ -18,7 +18,7 @@ Flash the SD card:./scripts/flash_image.sh /dev/sdX
 Boot the Pi, connect to the WiFi AP (e.g., plantomio_ap), and SSH:ssh pi@192.168.4.1
 
 
-Run the setup script:sudo python3 /home/pi/iot-lite/scripts/sysohub.py setup
+Run the setup script:sudo python3 /home/<USER>/sysohub/scripts/sysohub.py setup
 
 
 Access the dashboard at http://192.168.4.1:5000.
@@ -33,11 +33,11 @@ Dashboard: Flask UI at http://192.168.4.1:5000.
 
 Management
 
-Use sysohub.py for setup, backup, update, and status:sudo python3 /home/pi/iot-lite/scripts/sysohub.py [setup|backup|update|status]
+Use sysohub.py for setup, backup, update, and status:sudo python3 /home/<USER>/sysohub/scripts/sysohub.py [setup|backup|update|status]
 
 
 Schedule backups with cron:crontab -e
-0 2 * * * /home/pi/iot-lite/scripts/backup.sh
+0 2 * * * /home/<USER>/sysohub/scripts/backup.sh
 
 
 
