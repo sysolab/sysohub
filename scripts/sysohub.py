@@ -166,6 +166,7 @@ def install_victoria_metrics(config, temp_dir):
     else:
         # Remove any existing invalid binary
         run_command(f"sudo rm -f {vm_binary}", ignore_errors=True)
+        run_command(f"sudo rm -f /usr/local/bin/victoria-metrics-prod", ignore_errors=True)
         # Ensure /usr/local/bin exists and is writable
         run_command("sudo mkdir -p /usr/local/bin")
         run_command("sudo chmod 755 /usr/local/bin")
@@ -186,16 +187,21 @@ def install_victoria_metrics(config, temp_dir):
         print("Inspecting tarball contents...")
         tar_contents = run_command(f"tar -tzf {vm_tar}", check=False).stdout.strip()
         print(f"Tarball contents:\n{tar_contents}")
-        if "victoria-metrics" not in tar_contents:
-            raise ValueError(f"Tarball does not contain 'victoria-metrics' binary.")
+        if "victoria-metrics" not in tar_contents and "victoria-metrics-prod" not in tar_contents:
+            raise ValueError(f"Tarball does not contain expected binary ('victoria-metrics' or 'victoria-metrics-prod').")
         
         print("Extracting VictoriaMetrics binary...")
-        result = run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin", check=False)
-        if result.returncode != 0:
-            raise RuntimeError(f"Extraction failed: {result.stderr}")
-        # Verify the binary was extracted
+        run_command(f"sudo tar -xzf {vm_tar} -C /usr/local/bin")
+        # Check for victoria-metrics-prod and rename if necessary
+        prod_binary = "/usr/local/bin/victoria-metrics-prod"
+        if os.path.exists(prod_binary) and not os.path.exists(vm_binary):
+            print(f"Renaming {prod_binary} to {vm_binary}...")
+            run_command(f"sudo mv {prod_binary} {vm_binary}")
+        # Verify the binary exists
         if not os.path.exists(vm_binary):
-            raise FileNotFoundError(f"Failed to extract VictoriaMetrics binary to {vm_binary}. Tarball may not contain the expected binary.")
+            extracted_files = run_command("ls -l /usr/local/bin", check=False).stdout.strip()
+            print(f"Files in /usr/local/bin after extraction:\n{extracted_files}")
+            raise FileNotFoundError(f"Failed to extract or rename VictoriaMetrics binary to {vm_binary}.")
         run_command(f"sudo chmod +x {vm_binary}")
         run_command(f"sudo rm -f {vm_tar}")
 
