@@ -294,10 +294,16 @@ WantedBy=multi-user.target
 
 def install_dashboard(config, temp_dir):
     print("Installing Dashboard...")
-    if shutil.which("flask") and shutil.which("paho-mqtt"):
-        print("Flask and dependencies are already installed, skipping.")
-    else:
-        run_command("sudo pip3 install flask python-socketio paho-mqtt requests")
+    dashboard_packages = ["python3-flask", "python3-socketio", "python3-paho-mqtt", "python3-requests"]
+    packages_missing = False
+    for pkg in dashboard_packages:
+        if is_package_installed(pkg):
+            print(f"{pkg} is already installed, skipping.")
+        else:
+            packages_missing = True
+    if packages_missing:
+        print("Installing dashboard dependencies via apt...")
+        run_command("sudo apt update && sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests")
 
     dashboard_file = os.path.join(INSTALL_DIR, "flask_app.py")
     if update_file_if_changed("flask_app.py", dashboard_file, config, temp_dir):
@@ -348,7 +354,7 @@ def update():
     print("Updating services...")
     run_command("sudo apt update && sudo apt upgrade -y")
     run_command("sudo npm install -g --unsafe-perm node-red")
-    run_command("sudo pip3 install --upgrade flask python-socketio paho-mqtt requests")
+    run_command("sudo apt install -y python3-flask python3-socketio python3-paho-mqtt python3-requests")
     run_command("sudo systemctl restart mosquitto victoria-metrics nodered sysohub-dashboard", ignore_errors=True)
 
 def status():
