@@ -38,16 +38,20 @@ def render_template(template_name, dest, context):
     with open(dest, 'w') as f:
         f.write(template.render(**context))
 
-def run_command(command, check=True):
+def run_command(command, check=True, ignore_errors=False):
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    if check and result.returncode != 0:
+    if check and result.returncode != 0 and not ignore_errors:
         raise Exception(f"Command failed: {command}\n{result.stderr}")
     return result
 
 def setup_wifi_ap(config):
     print("Configuring WiFi AP...")
     run_command("sudo apt update && sudo apt install -y hostapd dnsmasq avahi-daemon")
-    run_command("sudo systemctl stop hostapd dnsmasq")
+    run_command("sudo systemctl stop hostapd dnsmasq", ignore_errors=True)
+
+    # Unmask services to ensure they can be enabled
+    for service in ["hostapd", "dnsmasq", "avahi-daemon"]:
+        run_command(f"sudo systemctl unmask {service}", ignore_errors=True)
 
     render_template("dhcpcd.conf.j2", "/etc/dhcpcd.conf", config)
     render_template("hostapd.conf.j2", "/etc/hostapd/hostapd.conf", config)
@@ -57,8 +61,11 @@ def setup_wifi_ap(config):
     run_command(f"echo {config['hostname']} | sudo tee /etc/hostname")
     run_command(f"sudo sed -i 's/127.0.0.1.*/127.0.0.1 {config['hostname']}/' /etc/hosts")
     run_command("sudo sysctl -w net.ipv4.ip_forward=1")
-    run_command("sudo systemctl enable hostapd dnsmasq avahi-daemon")
-    run_command("sudo systemctl start hostapd dnsmasq avahi-daemon")
+
+    # Enable and start services, ignoring errors if already enabled
+    for service in ["hostapd", "dnsmasq", "avahi-daemon"]:
+        run_command(f"sudo systemctl enable {service}", ignore_errors=True)
+        run_command(f"sudo systemctl start {service}", ignore_errors=True)
 
 def install_mosquitto(config):
     print("Installing Mosquitto...")
@@ -66,22 +73,22 @@ def install_mosquitto(config):
     render_template("mosquitto.conf.j2", "/etc/mosquitto/mosquitto.conf", config)
     run_command(f"echo {config['mqtt']['username']}:{config['mqtt']['password']} | sudo tee /etc/mosquitto/passwd")
     run_command("sudo mosquitto_passwd -U /etc/mosquitto/passwd")
-    run_command("sudo systemctl enable mosquitto")
-    run_command("sudo systemctl start mosquitto")
+    run_command("sudo systemctl enable mosquitto", ignore_errors=True)
+    run_command("sudo systemctl start mosquitto", ignore_errors=True)
 
 def install_victoria_metrics(config):
     print("Installing VictoriaMetrics...")
     run_command("wget https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.93.0/victoria-metrics-arm-v1.93.0.tar.gz -O /tmp/vm.tar.gz")
     run_command("sudo tar -xzf /tmp/vm.tar.gz -C /usr/local/bin")
     render_template("victoria_metrics.yml.j2", "/etc/victoria-metrics.yml", config)
-    run_command("sudo useradd -r victoria-metrics")
+    run_command("sudo useradd -r victoria-metrics", ignore_errors=True)
     run_command("sudo chown victoria-metrics:victoria-metrics /usr/local/bin/victoria-metrics")
     run_command("sudo mkdir -p /var/lib/victoria-metrics")
     run_command("sudo chown victoria-metrics:victoria-metrics /var/lib/victoria-metrics")
     run_command("sudo bash -c 'cat <<EOF > /etc/systemd/system/victoria-metrics.service\n[Unit]\nDescription=VictoriaMetrics\nAfter=network.target\n\n[Service]\nUser=victoria-metrics\nGroup=victoria-metrics\nExecStart=/usr/local/bin/victoria-metrics --storageDataPath=/var/lib/victoria-metrics --httpListenAddr=:{}\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'".format(config['victoria_metrics']['port']))
     run_command("sudo systemctl daemon-reload")
-    run_command("sudo systemctl enable victoria-metrics")
-    run_command("sudo systemctl start victoria-metrics")
+    run_command("sudo systemctl enable victoria-metrics", ignore_errors=True)
+    run_command("sudo systemctl start victoria-metrics", ignore_errors=True)
 
 def install_node_red(config):
     print("Installing Node-RED...")
@@ -92,8 +99,8 @@ def install_node_red(config):
     render_template("node_red_settings.js.j2", os.path.join(node_red_dir, "settings.js"), config)
     run_command(f"sudo bash -c 'cat <<EOF > /etc/systemd/system/nodered.service\n[Unit]\nDescription=Node-RED\nAfter=network.target\n\n[Service]\nUser={os.getlogin()}\nExecStart=/usr/bin/node-red\nWorkingDirectory={node_red_dir}\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'")
     run_command("sudo systemctl daemon-reload")
-    run_command("sudo systemctl enable nodered")
-    run_command("sudo systemctl start nodered")
+    run_command("sudo systemctl enable nodered", ignore_errors=True)
+    run_command("sudo systemctl start nodered", ignore_errors=True)
 
 def install_dashboard(config):
     print("Installing Dashboard...")
@@ -101,23 +108,23 @@ def install_dashboard(config):
     shutil.copy(f"{TEMPLATES_DIR}/flask_app.py", f"{INSTALL_DIR}/flask_app.py")
     run_command(f"sudo bash -c 'cat <<EOF > /etc/systemd/system/sysohub-dashboard.service\n[Unit]\nDescription=sysohub Dashboard\nAfter=network.target\n\n[Service]\nUser={os.getlogin()}\nExecStart=/usr/bin/python3 {INSTALL_DIR}/flask_app.py\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'")
     run_command("sudo systemctl daemon-reload")
-    run_command("sudo systemctl enable sysohub-dashboard")
-    run_command("sudo systemctl start sysohub-dashboard")
+    run_command("sudo systemctl enable sysohub-dashboard", ignore_errors=True)
+    run_command("sudo systemctl start sysohub-dashboard", ignore_errors=True)
 
 def backup():
     print("Creating backup...")
     backup_dir = os.path.join(HOME_DIR, "backups")
     timestamp = run_command("date +%Y%m%d_%H%M%S", check=False).stdout.strip()
     os.makedirs(backup_dir, exist_ok=True)
-    run_command(f"tar -czf {backup_dir}/sysohub_backup_{timestamp}.tar.gz {INSTALL_DIR}")
-    print(f"Backup created at {backup_dir}/sysohub_backup_{timestamp}.tar.gz")
+    run_command(f"tar -czf {backup_dir}/iot_backup_{timestamp}.tar.gz {INSTALL_DIR}")
+    print(f"Backup created at {backup_dir}/iot_backup_{timestamp}.tar.gz")
 
 def update():
     print("Updating services...")
     run_command("sudo apt update && sudo apt upgrade -y")
     run_command("sudo npm install -g --unsafe-perm node-red")
     run_command("sudo pip3 install --upgrade flask python-socketio paho-mqtt requests")
-    run_command("sudo systemctl restart mosquitto victoria-metrics nodered sysohub-dashboard")
+    run_command("sudo systemctl restart mosquitto victoria-metrics nodered sysohub-dashboard", ignore_errors=True)
 
 def status():
     print("Service status:")
