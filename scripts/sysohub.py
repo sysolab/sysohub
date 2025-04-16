@@ -78,7 +78,7 @@ def install_mosquitto(config):
 
 def install_victoria_metrics(config):
     print("Installing VictoriaMetrics...")
-    run_command("wget https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.93.0/victoria-metrics-arm-v1.93.0.tar.gz -O /tmp/vm.tar.gz")
+    run_command("wget https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.115.0/victoria-metrics-darwin-arm64-v1.115.0.tar.gz -O /tmp/vm.tar.gz")
     run_command("sudo tar -xzf /tmp/vm.tar.gz -C /usr/local/bin")
     render_template("victoria_metrics.yml.j2", "/etc/victoria-metrics.yml", config)
     run_command("sudo useradd -r victoria-metrics", ignore_errors=True)
