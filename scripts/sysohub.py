@@ -248,8 +248,8 @@ After=network.target
 
 [Service]
 User={USER}
-Environment="NODE_OPTIONS=--max_old_space_size=256"
-ExecStart={node_path} {node_red_path} --max-old-space-size=256 -v
+Environment="NODE_OPTIONS=--max_old_space_size=512"
+ExecStart={node_path} {node_red_path} --max-old-space-size=512 -v
 WorkingDirectory={node_red_dir}
 Restart=on-failure
 KillSignal=SIGINT
