@@ -5,9 +5,11 @@ import subprocess
 import yaml
 import os
 
-app = Flask(__name__, template_folder='/home/pi/iot-lite/static')
+HOME_DIR = os.path.expanduser("~")
+INSTALL_DIR = os.path.join(HOME_DIR, "sysohub")
+CONFIG_PATH = os.path.join(INSTALL_DIR, "config", "config.yml")
 
-CONFIG_PATH = "/home/pi/iot-lite/config/config.yml"
+app = Flask(__name__, template_folder=os.path.join(INSTALL_DIR, "static"))
 
 def load_config():
     with open(CONFIG_PATH, 'r') as f:

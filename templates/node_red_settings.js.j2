@@ -11,8 +11,8 @@ module.exports = {
     },
     httpAdminRoot: "/admin",
     httpNodeRoot: "/",
-    userDir: "/home/pi/.node-red",
-    nodesDir: "/home/pi/.node-red/nodes",
+    userDir: "{{ HOME_DIR }}/.node-red",
+    nodesDir: "{{ HOME_DIR }}/.node-red/nodes",
     functionGlobalContext: {},
     mqttConfig: {
         host: "{{ mqtt.uri | replace('mqtt://', '') }}",

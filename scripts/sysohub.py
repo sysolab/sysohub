@@ -6,9 +6,10 @@ import argparse
 import shutil
 from pathlib import Path
 
-CONFIG_PATH = "/home/pi/iot-lite/config/config.yml"
-TEMPLATES_DIR = "/home/pi/iot-lite/templates"
-INSTALL_DIR = "/home/pi/iot-lite"
+HOME_DIR = os.path.expanduser("~")
+INSTALL_DIR = os.path.join(HOME_DIR, "sysohub")
+CONFIG_PATH = os.path.join(INSTALL_DIR, "config", "config.yml")
+TEMPLATES_DIR = os.path.join(INSTALL_DIR, "templates")
 
 def load_config():
     with open(CONFIG_PATH, 'r') as f:
@@ -69,7 +70,11 @@ def install_node_red(config):
     print("Installing Node-RED...")
     run_command("sudo apt install -y nodejs npm")
     run_command("sudo npm install -g --unsafe-perm node-red")
-    render_template("node_red_settings.js.j2", "/home/pi/.node-red/settings.js", config)
+    node_red_dir = os.path.join(HOME_DIR, ".node-red")
+    os.makedirs(node_red_dir, exist_ok=True)
+    render_template("node_red_settings.js.j2", os.path.join(node_red_dir, "settings.js"), config)
+    run_command(f"sudo bash -c 'cat <<EOF > /etc/systemd/system/nodered.service\n[Unit]\nDescription=Node-RED\nAfter=network.target\n\n[Service]\nUser={os.getlogin()}\nExecStart=/usr/bin/node-red\nWorkingDirectory={node_red_dir}\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'")
+    run_command("sudo systemctl daemon-reload")
     run_command("sudo systemctl enable nodered")
     run_command("sudo systemctl start nodered")
 
@@ -77,23 +82,24 @@ def install_dashboard(config):
     print("Installing Dashboard...")
     run_command("sudo pip3 install flask python-socketio paho-mqtt requests")
     shutil.copy(f"{TEMPLATES_DIR}/flask_app.py", f"{INSTALL_DIR}/flask_app.py")
-    run_command("sudo bash -c 'cat <<EOF > /etc/systemd/system/sysohub-dashboard.service\n[Unit]\nDescription=sysohub Dashboard\nAfter=network.target\n\n[Service]\nUser=pi\nExecStart=/usr/bin/python3 {}/flask_app.py\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'".format(INSTALL_DIR))
+    run_command(f"sudo bash -c 'cat <<EOF > /etc/systemd/system/sysohub-dashboard.service\n[Unit]\nDescription=sysohub Dashboard\nAfter=network.target\n\n[Service]\nUser={os.getlogin()}\nExecStart=/usr/bin/python3 {INSTALL_DIR}/flask_app.py\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF'")
     run_command("sudo systemctl daemon-reload")
     run_command("sudo systemctl enable sysohub-dashboard")
     run_command("sudo systemctl start sysohub-dashboard")
 
 def backup():
     print("Creating backup...")
-    backup_dir = "/home/pi/backups"
+    backup_dir = os.path.join(HOME_DIR, "backups")
     timestamp = run_command("date +%Y%m%d_%H%M%S", check=False).stdout.strip()
     os.makedirs(backup_dir, exist_ok=True)
-    run_command(f"tar -czf {backup_dir}/iot_backup_{timestamp}.tar.gz {INSTALL_DIR}")
-    print(f"Backup created at {backup_dir}/iot_backup_{timestamp}.tar.gz")
+    run_command(f"tar -czf {backup_dir}/sysohub_backup_{timestamp}.tar.gz {INSTALL_DIR}")
+    print(f"Backup created at {backup_dir}/sysohub_backup_{timestamp}.tar.gz")
 
 def update():
     print("Updating services...")
     run_command("sudo apt update && sudo apt upgrade -y")
     run_command("sudo npm install -g --unsafe-perm node-red")
+    run_command("sudo pip3 install --upgrade flask python-socketio paho-mqtt requests")
     run_command("sudo systemctl restart mosquitto victoria-metrics nodered sysohub-dashboard")
 
 def status():
