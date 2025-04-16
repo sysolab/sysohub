@@ -236,7 +236,7 @@ WantedBy=multi-user.target
 
 def install_node_red(config, temp_dir, update_mode=False):
     print("Installing Node-RED...")
-    node_red_installed = run_command("which node-red", check=False).returncode == 0
+    node_red_installed = run_command(f"sudo -u {USER} which node-red", check=False).returncode == 0
     if update_mode and not prompt_overwrite("Node-RED", node_red_installed):
         print("Skipping Node-RED installation/update.")
         return
@@ -246,19 +246,20 @@ def install_node_red(config, temp_dir, update_mode=False):
         run_command("sudo systemctl disable nodered || true", check=False)
         run_command("sudo rm -f /lib/systemd/system/nodered.service", ignore_errors=True)
         run_command("sudo systemctl daemon-reload", ignore_errors=True)
-        run_command(f"sudo rm -rf /usr/bin/node-red /usr/local/bin/node-red /root/.node-red {NODE_RED_DIR}", check=False)
+        # Remove any existing Node-RED installation, including root-owned files
+        run_command(f"sudo rm -rf /usr/bin/node-red* /usr/local/bin/node-red* /root/.node-red {NODE_RED_DIR}", check=False, ignore_errors=True)
 
-    # Use the official Node-RED installer script with explicit bash
-    print("Running official Node-RED installer...")
-    run_command("/bin/bash -c 'bash <(curl -sL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered) --confirm-install --confirm-pi'", shell="/bin/bash")
+    # Install Node-RED as the non-root user
+    print("Running official Node-RED installer as user", USER, "...")
+    run_command(f"sudo -u {USER} /bin/bash -c 'bash <(curl -sL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered) --confirm-install --confirm-pi'", shell="/bin/bash")
 
     # Ensure Node-RED directory exists with correct permissions
     os.makedirs(NODE_RED_DIR, exist_ok=True)
     run_command(f"sudo chown {USER}:{USER} {NODE_RED_DIR}")
     run_command(f"sudo chmod -R u+rw {NODE_RED_DIR}")
 
-    # Install node-red-contrib-victoriametrics (optional, but keeping for compatibility)
-    run_command(f"cd {NODE_RED_DIR} && npm install node-red-contrib-victoriametrics")
+    # Install node-red-contrib-victoriametrics as the non-root user
+    run_command(f"sudo -u {USER} /bin/bash -c 'cd {NODE_RED_DIR} && npm install node-red-contrib-victoriametrics'", shell="/bin/bash")
 
     # Configure Node-RED flow to forward MQTT to VictoriaMetrics using InfluxDB line protocol
     flows_file = os.path.join(NODE_RED_DIR, "flows.json")
@@ -406,7 +407,7 @@ return msg;""",
 
     # Update Node-RED service to ensure it runs as the correct user
     nodered_service = "/lib/systemd/system/nodered.service"  # Location used by the official installer
-    node_red_path = run_command("which node-red", check=False).stdout.strip() or "/usr/bin/node-red"
+    node_red_path = run_command(f"sudo -u {USER} which node-red", check=False).stdout.strip() or "/usr/local/bin/node-red"
     service_content = f"""[Unit]
 Description=Node-RED graphical event wiring tool
 After=network.target
@@ -555,7 +556,7 @@ def purge():
     run_command("sudo userdel victoria-metrics || true", check=False)
 
     # Remove Node-RED
-    run_command(f"sudo rm -rf /usr/bin/node-red /usr/local/bin/node-red /root/.node-red {NODE_RED_DIR}", ignore_errors=True)
+    run_command(f"sudo rm -rf /usr/bin/node-red* /usr/local/bin/node-red* /root/.node-red {NODE_RED_DIR}", ignore_errors=True)
 
     # Remove configuration files
     config_files = [
