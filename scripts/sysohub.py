@@ -440,6 +440,12 @@ WantedBy=multi-user.target
 
 def setup():
     print("Setting up a fresh Raspberry Pi OS installation...")
+    # Set permissions for sysohub.py itself
+    sysohub_script = os.path.join(INSTALL_DIR, "scripts/sysohub.py")
+    print(f"Setting permissions for {sysohub_script}...")
+    run_command(f"sudo chown {USER}:{USER} {sysohub_script}")
+    run_command(f"sudo chmod 755 {sysohub_script}")
+
     with tempfile.TemporaryDirectory() as temp_dir:
         config = load_config()
         # Update system packages
